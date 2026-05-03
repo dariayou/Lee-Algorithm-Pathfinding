@@ -21,6 +21,7 @@
 Откройте командную строку `psql` (или используйте pgAdmin) и выполните:
 
 CREATE DATABASE lee_algorithm;
+
 \c lee_algorithm;
 
 CREATE TABLE surface_types (
