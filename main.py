@@ -7,48 +7,51 @@ class LeeApp:
     def __init__(self, root, db):
         self.root = root
         self.db = db
-        
-        self.width = 20    
-        self.height = 15   
-        self.cell_size = 35  
+
+        self.width = 20
+        self.height = 15
+        self.cell_size = 35
         self.grid = [[(True, 1.0) for _ in range(self.width)] for _ in range(self.height)]
-        
+
         self.start = None
         self.goal = None
         self.path = None
-        
+
         self.canvas_frame = tk.Frame(root)
         self.canvas_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        
+
         self.canvas = tk.Canvas(self.canvas_frame, bg='white',
                                 width=self.width*self.cell_size,
                                 height=self.height*self.cell_size)
         self.h_scroll = tk.Scrollbar(self.canvas_frame, orient=tk.HORIZONTAL, command=self.canvas.xview)
         self.v_scroll = tk.Scrollbar(self.canvas_frame, orient=tk.VERTICAL, command=self.canvas.yview)
         self.canvas.configure(xscrollcommand=self.h_scroll.set, yscrollcommand=self.v_scroll.set)
-        
+
         self.h_scroll.pack(side=tk.BOTTOM, fill=tk.X)
         self.v_scroll.pack(side=tk.RIGHT, fill=tk.Y)
         self.canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        
+
         self.canvas.bind("<Button-1>", self.left_click)
         self.canvas.bind("<Button-3>", self.right_click)
 
         panel = tk.Frame(root)
         panel.pack(side=tk.RIGHT, fill=tk.Y, padx=10, pady=10)
-        
+
         tk.Button(panel, text="Загрузить сетку", command=self.load_grid).pack(pady=5)
         tk.Button(panel, text="Сохранить сетку", command=self.save_grid).pack(pady=5)
         tk.Button(panel, text="Очистить путь", command=self.clear_path).pack(pady=5)
         tk.Button(panel, text="Найти путь", command=self.find_and_draw).pack(pady=5)
-        tk.Button(panel, text="Сброс (стены удалить)", command=self.reset_walls).pack(pady=5)
+        
+        tk.Button(panel, text="Сбросить стены (убрать препятствия)", command=self.reset_walls).pack(pady=5)
+        tk.Button(panel, text="Сбросить типы поверхностей (всё обычное)", command=self.reset_surface_types).pack(pady=5)
+        
         tk.Button(panel, text="Очистить старт/цель", command=self.reset_start_goal).pack(pady=5)
-        
-        self.status = tk.Label(panel, text="Левый клик: старт/цель | Правый: стена", fg="blue")
+
+        self.status = tk.Label(panel, text="Правый клик - меню (стена/тип поверхности)", fg="blue")
         self.status.pack(pady=10)
-        
+
         self.draw_grid()
-    
+
     def draw_grid(self):
         self.canvas.delete("all")
         for y in range(self.height):
@@ -65,9 +68,9 @@ class LeeApp:
                         color = "gray"
                     else:
                         if cost == 3.0:
-                            color = "light green"
+                            color = "#a0522d"  # болото
                         elif cost == 0.5:
-                            color = "light yellow"
+                            color = "#b0c4de"  # асфальт
                         else:
                             color = "white"
                 x1 = x * self.cell_size
@@ -80,7 +83,7 @@ class LeeApp:
         for i in range(self.height+1):
             self.canvas.create_line(0, i*self.cell_size, self.width*self.cell_size, i*self.cell_size)
         self.canvas.config(scrollregion=self.canvas.bbox("all"))
-    
+
     def left_click(self, event):
         x = int(self.canvas.canvasx(event.x) // self.cell_size)
         y = int(self.canvas.canvasy(event.y) // self.cell_size)
@@ -93,18 +96,38 @@ class LeeApp:
                 self.start = (x, y)
             self.path = None
             self.draw_grid()
-    
+
     def right_click(self, event):
         x = int(self.canvas.canvasx(event.x) // self.cell_size)
         y = int(self.canvas.canvasy(event.y) // self.cell_size)
-        if 0 <= x < self.width and 0 <= y < self.height:
-            if (x, y) == self.start or (x, y) == self.goal:
-                return
-            walkable, cost = self.grid[y][x]
-            self.grid[y][x] = (not walkable, cost)
-            self.path = None
-            self.draw_grid()
-    
+        if not (0 <= x < self.width and 0 <= y < self.height):
+            return
+        if (x, y) == self.start or (x, y) == self.goal:
+            return
+
+        menu = tk.Menu(self.root, tearoff=0)
+        menu.add_command(label="Стена (непроходимо)", command=lambda: self.toggle_wall(x, y))
+        menu.add_separator()
+        menu.add_command(label="Обычная (cost=1.0)", command=lambda: self.set_surface(x, y, 1, 1.0))
+        menu.add_command(label="Болото (cost=3.0)", command=lambda: self.set_surface(x, y, 2, 3.0))
+        menu.add_command(label="Асфальт (cost=0.5)", command=lambda: self.set_surface(x, y, 3, 0.5))
+        menu.post(self.root.winfo_pointerx(), self.root.winfo_pointery())
+
+    def toggle_wall(self, x, y):
+        walkable, cost = self.grid[y][x]
+        new_walkable = not walkable
+        self.grid[y][x] = (new_walkable, cost)
+        surface_id = 1 if cost == 1.0 else (2 if cost == 3.0 else 3)
+        self.db.update_cell(x, y, new_walkable, surface_id)
+        self.path = None
+        self.draw_grid()
+
+    def set_surface(self, x, y, surface_id, cost):
+        self.grid[y][x] = (True, cost)
+        self.db.update_cell(x, y, True, surface_id)
+        self.path = None
+        self.draw_grid()
+
     def load_grid(self):
         try:
             loaded = self.db.load_grid(self.width, self.height)
@@ -116,32 +139,42 @@ class LeeApp:
             self.status.config(text="Сетка загружена из БД", fg="green")
         except Exception as e:
             messagebox.showerror("Ошибка загрузки", str(e))
-    
+
     def save_grid(self):
         try:
             self.db.save_grid(self.grid, self.width, self.height)
             self.status.config(text="Сетка сохранена в БД", fg="green")
         except Exception as e:
             messagebox.showerror("Ошибка сохранения", str(e))
-    
+
     def clear_path(self):
         self.path = None
         self.draw_grid()
-    
+
     def reset_walls(self):
+        """Убирает только стены (делает все клетки проходимыми), не меняя типы поверхности"""
         for y in range(self.height):
             for x in range(self.width):
                 walkable, cost = self.grid[y][x]
-                self.grid[y][x] = (True, cost)
+                self.grid[y][x] = (True, cost)   
         self.path = None
         self.draw_grid()
-    
+
+    def reset_surface_types(self):
+        """Сбрасывает все типы поверхности на обычную (cost=1.0), но не меняет стены"""
+        for y in range(self.height):
+            for x in range(self.width):
+                walkable, cost = self.grid[y][x]
+                self.grid[y][x] = (walkable, 1.0)  
+        self.path = None
+        self.draw_grid()
+
     def reset_start_goal(self):
         self.start = None
         self.goal = None
         self.path = None
         self.draw_grid()
-    
+
     def find_and_draw(self):
         if self.start is None or self.goal is None:
             messagebox.showwarning("Ошибка", "Выберите начальную и целевую точки")
@@ -157,7 +190,7 @@ class LeeApp:
         if not self.grid[self.goal[1]][self.goal[0]][0]:
             messagebox.showerror("Ошибка", "Целевая точка - стена")
             return
-        
+
         path = find_path(self.grid, self.start, self.goal)
         if path is None:
             messagebox.showerror("Путь не найден", "Невозможно достичь цели")
@@ -166,8 +199,8 @@ class LeeApp:
             self.path = path
             length = 0.0
             for i in range(len(path)-1):
-                x1,y1 = path[i]
-                x2,y2 = path[i+1]
+                x1, y1 = path[i]
+                x2, y2 = path[i+1]
                 dx = abs(x2-x1)
                 dy = abs(y2-y1)
                 if dx+dy == 1:
@@ -181,7 +214,7 @@ class LeeApp:
         self.draw_grid()
 
 if __name__ == "__main__":
-    db = DatabaseManager(password='password') 
+    db = DatabaseManager(password='password')  
     root = tk.Tk()
     root.title("Волновой алгоритм Ли")
     app = LeeApp(root, db)
