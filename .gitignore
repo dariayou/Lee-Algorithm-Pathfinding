@@ -1,0 +1,17 @@
+# Виртуальное окружение
+venv/
+env/
+ENV/
+
+# Файлы базы данных
+*.db
+*.sqlite3
+
+# Файлы настроек Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Файлы IDE
+.vscode/
+.idea/
